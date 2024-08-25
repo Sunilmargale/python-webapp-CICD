@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+    
+    environment {
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Sunilmargale/python-webapp-CICD.git'
+            }
+        }
+        
+        stage('Owasp FS Scan') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DC'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
+        stage('Trivy FS') {
+            steps {
+                sh "trivy fs ."
+            }
+        }
+        
+        stage('Sonarqube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-scanner') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=python-webapp \
+                    -Dsonar.projectKey=python-webapp '''
+                }
+            }
+        }
+        
+        stage ("Docker Build & Tag") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "make image"
+                        
+                    }
+                }
+            }
+        }
+        
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image sunilmargale/python-webapp:latest"
+            }
+        }
+        
+        stage ("Docker Push Image") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "make push"
+                        
+                    }
+                }
+            }
+        }
+        
+        stage ("Deploy to Docker Container") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker run -dp 5000:5000 sunilmargale/python-webapp:latest"
+                        
+                    }
+                }
+            }
+        }
+    }
+}
